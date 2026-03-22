@@ -18,6 +18,8 @@ def _check_api_key(provider: str) -> None:
         raise SystemExit("Error: Set OPENAI_API_KEY in .env or environment (see .env.example).")
     if provider == "huggingface" and not os.environ.get("HUGGINGFACE_TOKEN"):
         raise SystemExit("Error: Set HUGGINGFACE_TOKEN in .env or environment (see .env.example).")
+    if provider == "gemini" and not os.environ.get("GOOGLE_API_KEY"):
+        raise SystemExit("Error: Set GOOGLE_API_KEY in .env or environment (see .env.example).")
 
 
 def _default_output_path(input_path: Path) -> Path:
@@ -49,8 +51,6 @@ def run(
         pages,
         provider=provider,
         model_name=model_name,
-        api_key=os.environ.get("OPENAI_API_KEY"),
-        token=os.environ.get("HUGGINGFACE_TOKEN"),
     )
     if not highlights:
         print("No highlights returned by AI; saving copy without new annotations.")
@@ -95,7 +95,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--provider",
-        choices=("openai", "huggingface"),
+        choices=("openai", "huggingface", "gemini"),
         default="openai",
         help="AI provider (default: openai)",
     )

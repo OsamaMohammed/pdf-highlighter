@@ -1,6 +1,6 @@
 # PDF AI Highlighter
 
-Highlights bullet points, important details, and novelty/contribution text in academic PDFs using AI (OpenAI or Hugging Face), then saves a new PDF with annotations.
+Highlights bullet points, important details, and novelty/contribution text in academic PDFs using AI (OpenAI, Hugging Face, or Google Gemini), then saves a new PDF with annotations.
 
 ## Setup
 
@@ -16,6 +16,7 @@ Highlights bullet points, important details, and novelty/contribution text in ac
 
    - **OpenAI**: Get an API key from [platform.openai.com/api-keys](https://platform.openai.com/api-keys). Set `OPENAI_API_KEY` in `.env`.
    - **Hugging Face**: Create a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) with "Inference API" scope. Set `HUGGINGFACE_TOKEN` in `.env`.
+   - **Google Gemini**: Create an API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). Set `GOOGLE_API_KEY` in `.env`.
 
 ## Usage
 
@@ -26,6 +27,9 @@ python -m pdf_highlighter paper.pdf -o paper_highlighted.pdf --provider openai
 # Using Hugging Face (uses HF serverless; optional --model-name)
 python -m pdf_highlighter paper.pdf -o paper_highlighted.pdf --provider huggingface
 
+# Using Google Gemini (default model: gemini-1.5-flash)
+python -m pdf_highlighter paper.pdf -o paper_highlighted.pdf --provider gemini
+
 # Different colors per category (bullet / important / novelty)
 python -m pdf_highlighter paper.pdf --category-colors
 ```
@@ -34,14 +38,16 @@ python -m pdf_highlighter paper.pdf --category-colors
 
 - `input_pdf`: Path to the input PDF (or multiple paths).
 - `-o`, `--output`: Output PDF path (default: `{input_stem}_highlighted.pdf`).
-- `--provider`: `openai` or `huggingface`.
-- `--model-name`: Model name (overrides `.env`). For OpenAI: e.g. `gpt-4o`, `gpt-4o-mini`. For Hugging Face: e.g. `Qwen/Qwen2.5-7B-Instruct`.
+- `--provider`: `openai`, `huggingface`, or `gemini`.
+- `--model-name`: Model name (overrides `.env`). For OpenAI: e.g. `gpt-4o`, `gpt-4o-mini`. For Hugging Face: e.g. `Qwen/Qwen2.5-7B-Instruct`. For Gemini: e.g. `gemini-1.5-flash`, `gemini-1.5-pro`.
 - `--category-colors`: Use different highlight colors for bullets, important, and novelty.
 - `-v`, `--verbose`: Show API warnings when no highlights are returned.
 
 ## Environment (.env)
 
 **OpenAI model:** Set `OPENAI_MODEL` to choose the model when using `--provider openai` (default: `gpt-4o`). Examples: `OPENAI_MODEL=gpt-4o-mini`, `OPENAI_MODEL=gpt-4o`. Command-line `--model-name` overrides this.
+
+**Gemini model:** Set `GEMINI_MODEL` to choose the model when using `--provider gemini` (default: `gemini-1.5-flash`). Command-line `--model-name` overrides this.
 
 **Highlight colors** – You can override highlight colors in `.env`:
 

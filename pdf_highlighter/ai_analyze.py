@@ -24,6 +24,13 @@ except ImportError:
     def tqdm(iterable, **kwargs):  # type: ignore
         return iterable
 
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    genai = None
+    types = None  # type: ignore
+
 
 # Maximum chars per chunk to stay within context (conservative for HF models)
 CHUNK_CHAR_LIMIT = 6000
@@ -120,6 +127,10 @@ def _parse_json_from_response(raw: str) -> list[dict[str, Any]]:
 ENV_OPENAI_MODEL = "OPENAI_MODEL"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
 
+# Gemini configuration
+ENV_GEMINI_MODEL = "GEMINI_MODEL"
+DEFAULT_GEMINI_MODEL = "gemini-1.5-flash"
+
 
 def get_highlights_openai(
     pages: list[tuple[int, str]],
@@ -133,6 +144,8 @@ def get_highlights_openai(
     if OpenAI is None:
         raise RuntimeError("OpenAI package not installed. pip install openai")
     key = api_key or os.environ.get("OPENAI_API_KEY")
+    if key:
+        key = key.strip().strip('"\'')
     if not key:
         raise ValueError("Set OPENAI_API_KEY in .env or pass api_key")
     model = (model_name or os.environ.get(ENV_OPENAI_MODEL) or DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
@@ -239,6 +252,31 @@ def _get_content_from_hf_response(response: Any) -> str:
         return (message.get("content") or "") if isinstance(message, dict) else ""
 
 
+def _get_text_from_gemini_response(response: Any) -> str:
+    """Extract text content from Gemini generate_content response."""
+    if response is None:
+        return ""
+    # google-genai responses typically expose a .text convenience attribute
+    text = getattr(response, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text
+    # Fallback to candidates structure if needed
+    candidates = getattr(response, "candidates", None)
+    if not candidates:
+        return ""
+    first = candidates[0]
+    content = getattr(first, "content", None)
+    if not content:
+        return ""
+    parts = getattr(content, "parts", None) or []
+    texts: list[str] = []
+    for part in parts:
+        t = getattr(part, "text", None)
+        if isinstance(t, str):
+            texts.append(t)
+    return "\n".join(texts).strip()
+
+
 # Default model for Hugging Face: use HF's own serverless (hf-inference), not third-party providers like Together.
 # Mixtral-8x7B is deprecated on Together (410 Gone). Qwen2.5-7B is available on hf-inference.
 DEFAULT_HF_MODEL = "Qwen/Qwen2.5-7B-Instruct"
@@ -256,6 +294,8 @@ def get_highlights_huggingface(
     if InferenceClient is None:
         raise RuntimeError("huggingface_hub not installed. pip install huggingface_hub")
     tok = token or os.environ.get("HUGGINGFACE_TOKEN")
+    if tok:
+        tok = tok.strip().strip('"\'')
     if not tok:
         raise ValueError("Set HUGGINGFACE_TOKEN in .env or pass token")
 
@@ -304,6 +344,74 @@ def get_highlights_huggingface(
     return results
 
 
+def get_highlights_gemini(
+    pages: list[tuple[int, str]],
+    model_name: str | None = None,
+    api_key: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Use Google Gemini API. Returns list of { "text", "category", "page_index" }.
+    Model: --model-name > GEMINI_MODEL in .env > gemini-1.5-flash.
+    """
+    if genai is None:
+        raise RuntimeError("google-genai package not installed. pip install google-genai")
+    key = api_key or os.environ.get("GOOGLE_API_KEY")
+    if key:
+        key = key.strip().strip('"\'')
+    if not key:
+        raise ValueError("Set GOOGLE_API_KEY in .env or pass api_key")
+    model_name_or_default = (model_name or os.environ.get(ENV_GEMINI_MODEL) or DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
+
+    client = genai.Client(api_key=key)
+
+    results: list[dict[str, Any]] = []
+    chunks = _chunk_pages(pages, PAGES_PER_CHUNK)
+
+    for chunk in tqdm(chunks, desc="AI highlighting", unit="chunk"):
+        if not chunk:
+            continue
+        first_page_index = chunk[0][0]
+        try:
+            response = client.models.generate_content(
+                model=model_name_or_default,
+                contents=_user_prompt_multi(chunk),
+                config=types.GenerateContentConfig(
+                    system_instruction=_system_prompt(),
+                ),
+            )
+            content = _get_text_from_gemini_response(response)
+            if not content:
+                continue
+        except Exception as e:  # pragma: no cover - network/API issues
+            import warnings
+
+            warnings.warn(
+                f"Gemini API error on chunk (pages {chunk[0][0] + 1}-{chunk[-1][0] + 1}): {e}. Check GOOGLE_API_KEY and model name.",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        
+        parsed = _parse_json_from_response(content)
+        for item in parsed:
+            if not isinstance(item, dict) or not item.get("text"):
+                continue
+            try:
+                page_one = max(1, min(int(item.get("page") or 1), len(chunk)))
+            except (TypeError, ValueError):
+                page_one = 1
+            page_index = first_page_index + page_one - 1
+            results.append(
+                {
+                    "text": (item.get("text") or "").strip(),
+                    "category": item.get("category") or "important",
+                    "page_index": page_index,
+                }
+            )
+
+    return results
+
+
 def get_highlights(
     pages: list[tuple[int, str]],
     provider: str = "openai",
@@ -311,7 +419,7 @@ def get_highlights(
     **kwargs: Any,
 ) -> list[dict[str, Any]]:
     """
-    Get highlights from AI. provider in ("openai", "huggingface").
+    Get highlights from AI. provider in ("openai", "huggingface", "gemini").
     kwargs passed to the provider (e.g. api_key, token).
     """
     if provider == "openai":
@@ -325,5 +433,11 @@ def get_highlights(
             pages,
             model_name=model_name or DEFAULT_HF_MODEL,
             token=kwargs.get("token"),
+        )
+    if provider == "gemini":
+        return get_highlights_gemini(
+            pages,
+            model_name=model_name,
+            api_key=kwargs.get("api_key"),
         )
     raise ValueError(f"Unknown provider: {provider}")
