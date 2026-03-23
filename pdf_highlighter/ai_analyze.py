@@ -412,6 +412,24 @@ def get_highlights_gemini(
     return results
 
 
+def _trim_pages_at_references(pages: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """Trim text and stop including pages once References or Acknowledgments section is reached."""
+    filtered_pages = []
+    # Match headers like "References", "Acknowledgments", "VI. REFERENCES" etc.
+    pattern = re.compile(r"^\s*(?:[\dIVX]+\.?\s*)?(?:REFERENCES?|ACKNOWLEDGMENTS?|BIBLIOGRAPHY)\s*$", re.IGNORECASE | re.MULTILINE)
+    
+    for page_idx, text in pages:
+        match = pattern.search(text)
+        if match:
+            # Truncate text before the match and stop
+            cut_text = text[:match.start()]
+            if cut_text.strip():
+                filtered_pages.append((page_idx, cut_text))
+            break
+        filtered_pages.append((page_idx, text))
+    return filtered_pages
+
+
 def get_highlights(
     pages: list[tuple[int, str]],
     provider: str = "openai",
@@ -422,6 +440,8 @@ def get_highlights(
     Get highlights from AI. provider in ("openai", "huggingface", "gemini").
     kwargs passed to the provider (e.g. api_key, token).
     """
+    pages = _trim_pages_at_references(pages)
+
     if provider == "openai":
         return get_highlights_openai(
             pages,
